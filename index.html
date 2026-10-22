@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hand Tracking Interactive Particles</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      background-color: #050508;
+      color: #ffffff;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 1;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    #input-video {
+      display: none;
+    }
+    #ui-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 10;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 24px;
+    }
+    .header {
+      background: rgba(15, 15, 25, 0.65);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 16px 24px;
+      border-radius: 16px;
+      max-width: 420px;
+      pointer-events: auto;
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    }
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+      background: linear-gradient(135deg, #a855f7, #ec4899, #3b82f6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    p.subtitle {
+      font-size: 0.85rem;
+      color: #a1a1aa;
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      padding: 6px 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 20px;
+      font-size: 0.8rem;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #eab308;
+      box-shadow: 0 0 8px #eab308;
+    }
+    .status-dot.active {
+      background-color: #22c55e;
+      box-shadow: 0 0 8px #22c55e;
+    }
+    .gestures-guide {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .gesture-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 10px;
+      border-radius: 10px;
+      text-align: center;
+      transition: all 0.3s ease;
+    }
+    .gesture-card.active {
+      background: rgba(236, 72, 153, 0.15);
+      border-color: rgba(236, 72, 153, 0.5);
+      transform: translateY(-2px);
+    }
+    .gesture-icon {
+      font-size: 1.5rem;
+      margin-bottom: 4px;
+    }
+    .gesture-name {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #e4e4e7;
+    }
+    .gesture-desc {
+      font-size: 0.65rem;
+      color: #71717a;
+    }
+    #webcam-preview-container {
+      position: absolute;
+      bottom: 24px;
+      right: 24px;
+      width: 160px;
+      height: 120px;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      pointer-events: auto;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      background: #000;
+    }
+    #preview-canvas {
+      width: 100%;
+      height: 100%;
+      transform: scaleX(-1);
+      object-fit: cover;
+    }
+    #loading-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #050508;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      transition: opacity 0.5s ease;
+    }
+    .spinner {
+      width: 50px;
+      height: 50px;
+      border: 3px solid rgba(255, 255, 255, 0.1);
+      border-top-color: #ec4899;
+      border-radius: 50%;
+      animation: spin 1s infinite linear;
+      margin-bottom: 20px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+
+  <!-- MediaPipe Library -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <!-- Three.js Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+  <div id="loading-screen">
+    <div class="spinner"></div>
+    <p style="color: #a1a1aa; font-size: 0.9rem;">กำลังเริ่มระบบ Hand Tracking...</p>
+  </div>
+
+  <video id="input-video" playsinline></video>
+  <div id="canvas-container"></div>
+
+  <div id="ui-layer">
+    <div class="header">
+      <h1>Hand Tracking Playground</h1>
+      <p class="subtitle">ขยับมือเพื่อควบคุมละอองดาวแบบ Interactive</p>
+      
+      <div class="status-badge">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">กำลังเปิดกล้อง...</span>
+      </div>
+
+      <div class="gestures-guide">
+        <div class="gesture-card active" id="card-default">
+          <div class="gesture-icon">⚪</div>
+          <div class="gesture-name">ปกติ</div>
+          <div class="gesture-desc">ชู 1 นิ้ว / ทั่วไป</div>
+        </div>
+        <div class="gesture-card" id="card-pinch">
+          <div class="gesture-icon">✌️</div>
+          <div class="gesture-name">2 นิ้ว</div>
+          <div class="gesture-desc">สายหางแสงพลิ้วไหว</div>
+        </div>
+        <div class="gesture-card" id="card-open">
+          <div class="gesture-icon">🖐️</div>
+          <div class="gesture-name">ชู 5 นิ้ว</div>
+          <div class="gesture-desc">กระจายตัวออก</div>
+        </div>
+        <div class="gesture-card" id="card-fist">
+          <div class="gesture-icon">✊</div>
+          <div class="gesture-name">กำมือ</div>
+          <div class="gesture-desc">รวมเป็นรูปหัวใจ</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="webcam-preview-container">
+      <canvas id="preview-canvas"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const PARTICLE_COUNT = 4000;
+    let scene, camera, renderer, particleSystem;
+    let positions, colors;
+    let currentMode = 'DEFAULT';
+
+    let handPos = { x: 0, y: 0, z: 0 };
+    let targetHandPos = { x: 0, y: 0, z: 0 };
+
+    // เก็บประวัติการเคลื่อนที่ของปลายนิ้วชี้และนิ้วกลาง เพื่อทำเป็น Trail สายยาว
+    const TRAIL_LENGTH = 80;
+    let fingerTrail = [];
+    for (let i = 0; i < TRAIL_LENGTH; i++) {
+      fingerTrail.push({ x: 0, y: 0, z: 0 });
+    }
+
+    let indexTipPos = { x: 0, y: 0, z: 0 };
+    let middleTipPos = { x: 0, y: 0, z: 0 };
+    let targetIndexTip = { x: 0, y: 0, z: 0 };
+    let targetMiddleTip = { x: 0, y: 0, z: 0 };
+
+    const heartShapePoints = [];
+
+    function initThree() {
+      const container = document.getElementById('canvas-container');
+      
+      scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0x050508, 0.015);
+
+      camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.z = 40;
+
+      renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+      container.appendChild(renderer.domElement);
+
+      const geometry = new THREE.BufferGeometry();
+      positions = new Float32Array(PARTICLE_COUNT * 3);
+      colors = new Float32Array(PARTICLE_COUNT * 3);
+
+      generateHeartPoints();
+
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const u = Math.random();
+        const v = Math.random();
+        const theta = u * 2.0 * Math.PI;
+        const phi = Math.acos(2.0 * v - 1.0);
+        const r = 8 + Math.random() * 2;
+
+        positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+        positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+        positions[i * 3 + 2] = r * Math.cos(phi);
+
+        colors[i * 3] = 0.2;
+        colors[i * 3 + 1] = 0.6;
+        colors[i * 3 + 2] = 1.0;
+      }
+
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+      // สร้างภาพอนุภาคแบบโปร่งแสงวงกลม
+      const canvas = document.createElement('canvas');
+      canvas.width = 16;
+      canvas.height = 16;
+      const ctx = canvas.getContext('2d');
+      const grad = ctx.createRadialGradient(8, 8, 0, 8, 8, 8);
+      grad.addColorStop(0, 'rgba(255,255,255,1)');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 16, 16);
+      const texture = new THREE.CanvasTexture(canvas);
+
+      const material = new THREE.PointsMaterial({
+        size: 0.6,
+        vertexColors: true,
+        map: texture,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+
+      particleSystem = new THREE.Points(geometry, material);
+      scene.add(particleSystem);
+
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    function generateHeartPoints() {
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const t = Math.random() * Math.PI * 2;
+        let x = 16 * Math.pow(Math.sin(t), 3);
+        let y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+        let z = (Math.random() - 0.5) * 8;
+        x *= 0.5;
+        y *= 0.5;
+        heartShapePoints.push({ x, y, z });
+      }
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    let clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const elapsedTime = clock.getElapsedTime();
+
+      // Smooth Movement ของมือหลัก
+      handPos.x += (targetHandPos.x - handPos.x) * 0.15;
+      handPos.y += (targetHandPos.y - handPos.y) * 0.15;
+      handPos.z += (targetHandPos.z - handPos.z) * 0.15;
+
+      // Smooth Movement ของปลายทั้ง 2 นิ้ว
+      indexTipPos.x += (targetIndexTip.x - indexTipPos.x) * 0.2;
+      indexTipPos.y += (targetIndexTip.y - indexTipPos.y) * 0.2;
+      indexTipPos.z += (targetIndexTip.z - indexTipPos.z) * 0.2;
+
+      middleTipPos.x += (targetMiddleTip.x - middleTipPos.x) * 0.2;
+      middleTipPos.y += (targetMiddleTip.y - middleTipPos.y) * 0.2;
+      middleTipPos.z += (targetMiddleTip.z - middleTipPos.z) * 0.2;
+
+      // อัปเดตตำแหน่งจุดศูนย์กลางระหว่าง 2 นิ้ว เพื่อสร้าง Trail
+      const mid2Fingers = {
+        x: (indexTipPos.x + middleTipPos.x) * 0.5,
+        y: (indexTipPos.y + middleTipPos.y) * 0.5,
+        z: (indexTipPos.z + middleTipPos.z) * 0.5
+      };
+
+      // ดันประวัติพิกัดเก่าออกและเติมพิกัดปัจจุบันใส่หัวแถว
+      fingerTrail.pop();
+      fingerTrail.unshift({ x: mid2Fingers.x, y: mid2Fingers.y, z: mid2Fingers.z });
+
+      const posAttr = particleSystem.geometry.attributes.position;
+      const colorAttr = particleSystem.geometry.attributes.color;
+
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        let i3 = i * 3;
+        let px = positions[i3];
+        let py = positions[i3 + 1];
+        let pz = positions[i3 + 2];
+
+        let tx = 0, ty = 0, tz = 0;
+        let targetR = 0.2, targetG = 0.6, targetB = 1.0;
+
+        if (currentMode === 'DEFAULT') {
+          // โหมดปกติ: ทรงกลมลอยรอบฝ่ามือ
+          const u = (i / PARTICLE_COUNT) * Math.PI * 2;
+          const v = Math.sin(i + elapsedTime);
+          const r = 6 + Math.sin(elapsedTime * 2 + i) * 1.2;
+
+          tx = handPos.x + r * Math.sin(v) * Math.cos(u + elapsedTime * 0.5);
+          ty = handPos.y + r * Math.sin(v) * Math.sin(u + elapsedTime * 0.5);
+          tz = handPos.z + r * Math.cos(v);
+
+          targetR = 0.2; targetG = 0.6; targetB = 1.0;
+
+        } else if (currentMode === 'PINCH') {
+          // โหมด 2 นิ้ว: เป็นสายหางแสง (Light Trail / Ribbon) พลิ้วเรียงต่อกัน
+          // กระจายอนุภาคแบ่งตามจุดบน Trail สายหาง
+          const trailIdx = Math.floor((i / PARTICLE_COUNT) * (TRAIL_LENGTH - 1));
+          const tPoint = fingerTrail[trailIdx] || mid2Fingers;
+
+          // เพิ่มความกว้างของริ้วแสงตามลำดับ และความพลิ้วจาก Wave
+          const spread = (trailIdx / TRAIL_LENGTH) * 1.5 + 0.3;
+          const waveX = Math.sin(elapsedTime * 12 + trailIdx * 0.2 + i) * spread;
+          const waveY = Math.cos(elapsedTime * 12 + trailIdx * 0.2 + i) * spread;
+          const waveZ = Math.sin(elapsedTime * 6 + trailIdx * 0.1) * spread;
+
+          tx = tPoint.x + waveX;
+          ty = tPoint.y + waveY;
+          tz = tPoint.z + waveZ;
+
+          // ไล่โทนสีจากปลายนิ้ว (ฟ้า/เขียวมรกต) ไปยังหาง (ม่วง/ชมพู)
+          const colorProgress = trailIdx / TRAIL_LENGTH;
+          targetR = THREE.MathUtils.lerp(0.1, 0.9, colorProgress);
+          targetG = THREE.MathUtils.lerp(0.9, 0.2, colorProgress);
+          targetB = THREE.MathUtils.lerp(0.9, 0.9, colorProgress);
+
+        } else if (currentMode === 'OPEN') {
+          // โหมดชู 5 นิ้ว: ระเบิดกระจายออก
+          const angle = (i / PARTICLE_COUNT) * Math.PI * 2 * 8;
+          const radius = 22 + (i % 40) * 0.6 + Math.sin(elapsedTime * 3 + i) * 4;
+
+          tx = handPos.x + Math.cos(angle) * radius;
+          ty = handPos.y + Math.sin(angle) * radius;
+          tz = handPos.z + (Math.sin(i) - 0.5) * radius;
+
+          targetR = 1.0; targetG = 0.7; targetB = 0.2;
+
+        } else if (currentMode === 'FIST') {
+          // โหมดกำมือ: รวมตัวเป็นรูปหัวใจ
+          const pt = heartShapePoints[i];
+          const beat = 1 + Math.pow(Math.sin(elapsedTime * 4), 6) * 0.15;
+
+          tx = handPos.x + pt.x * beat;
+          ty = handPos.y + pt.y * beat;
+          tz = handPos.z + pt.z * beat;
+
+          targetR = 1.0; targetG = 0.1; targetB = 0.4;
+        }
+
+        // ความเร็วในการตอบสนองตามพิกัด (Lerp Speed)
+        const lerpSpeed = (currentMode === 'PINCH') ? 0.25 : 0.1;
+        positions[i3] += (tx - px) * lerpSpeed;
+        positions[i3 + 1] += (ty - py) * lerpSpeed;
+        positions[i3 + 2] += (tz - pz) * lerpSpeed;
+
+        colors[i3] += (targetR - colors[i3]) * 0.08;
+        colors[i3 + 1] += (targetG - colors[i3 + 1]) * 0.08;
+        colors[i3 + 2] += (targetB - colors[i3 + 2]) * 0.08;
+      }
+
+      posAttr.needsUpdate = true;
+      colorAttr.needsUpdate = true;
+
+      // หมุนฉากเฉพาะตอนโหมดปกติหรือรูปหัวใจ
+      if (currentMode !== 'PINCH') {
+        particleSystem.rotation.y = elapsedTime * 0.05;
+      } else {
+        particleSystem.rotation.y = 0;
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    // --- ส่วนของ MediaPipe Tracking ---
+    const videoElement = document.getElementById('input-video');
+    const previewCanvas = document.getElementById('preview-canvas');
+    const previewCtx = previewCanvas.getContext('2d');
+
+    function onResults(results) {
+      const loadingScreen = document.getElementById('loading-screen');
+      if (loadingScreen && loadingScreen.style.display !== 'none') {
+        loadingScreen.style.opacity = '0';
+        setTimeout(() => { loadingScreen.style.display = 'none'; }, 500);
+      }
+
+      previewCanvas.width = videoElement.videoWidth || 320;
+      previewCanvas.height = videoElement.videoHeight || 240;
+      
+      previewCtx.save();
+      previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+      previewCtx.drawImage(results.image, 0, 0, previewCanvas.width, previewCanvas.height);
+
+      const statusDot = document.getElementById('status-dot');
+      const statusText = document.getElementById('status-text');
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        statusDot.classList.add('active');
+        statusText.innerText = "ตรวจพบมือ - กำลังแสดงผล";
+
+        const landmarks = results.multiHandLandmarks[0];
+
+        if (typeof drawConnectors !== 'undefined') {
+          drawConnectors(previewCtx, landmarks, HAND_CONNECTIONS, { color: '#ec4899', lineWidth: 2 });
+          drawLandmarks(previewCtx, landmarks, { color: '#3b82f6', lineWidth: 1, radius: 2 });
+        }
+
+        // ศูนย์กลางฝ่ามือ
+        const palmX = landmarks[9].x;
+        const palmY = landmarks[9].y;
+
+        targetHandPos.x = -(palmX - 0.5) * 50;
+        targetHandPos.y = -(palmY - 0.5) * 35;
+        targetHandPos.z = 0;
+
+        // พิกัดปลายนิ้วชี้ (Landmark 8) และนิ้วกลาง (Landmark 12)
+        targetIndexTip.x = -(landmarks[8].x - 0.5) * 50;
+        targetIndexTip.y = -(landmarks[8].y - 0.5) * 35;
+        targetIndexTip.z = -(landmarks[8].z) * 20;
+
+        targetMiddleTip.x = -(landmarks[12].x - 0.5) * 50;
+        targetMiddleTip.y = -(landmarks[12].y - 0.5) * 35;
+        targetMiddleTip.z = -(landmarks[12].z) * 20;
+
+        // ตรวจสอบสถานะการเหยียดนิ้ว
+        const isIndexUp = landmarks[8].y < landmarks[6].y;
+        const isMiddleUp = landmarks[12].y < landmarks[10].y;
+        const isRingUp = landmarks[16].y < landmarks[14].y;
+        const isPinkyUp = landmarks[20].y < landmarks[18].y;
+
+        let fingerCount = 0;
+        if (isIndexUp) fingerCount++;
+        if (isMiddleUp) fingerCount++;
+        if (isRingUp) fingerCount++;
+        if (isPinkyUp) fingerCount++;
+
+        if (fingerCount === 0) {
+          setMode('FIST');
+        } else if (fingerCount === 2 && isIndexUp && isMiddleUp) {
+          // ชู 2 นิ้ว -> โหมดสายหางแสง
+          setMode('PINCH');
+        } else if (fingerCount >= 4) {
+          setMode('OPEN');
+        } else {
+          setMode('DEFAULT');
+        }
+
+      } else {
+        statusDot.classList.remove('active');
+        statusText.innerText = "ไม่พบมือ - กรุณายกมือขึ้นหน้ากล้อง";
+        setMode('DEFAULT');
+        targetHandPos.x = 0;
+        targetHandPos.y = 0;
+      }
+      previewCtx.restore();
+    }
+
+    function setMode(mode) {
+      if (currentMode === mode) return;
+      currentMode = mode;
+
+      document.querySelectorAll('.gesture-card').forEach(card => card.classList.remove('active'));
+      
+      if (mode === 'DEFAULT') document.getElementById('card-default').classList.add('active');
+      if (mode === 'PINCH') document.getElementById('card-pinch').classList.add('active');
+      if (mode === 'OPEN') document.getElementById('card-open').classList.add('active');
+      if (mode === 'FIST') document.getElementById('card-fist').classList.add('active');
+    }
+
+    const hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 0,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    hands.onResults(onResults);
+
+    const cameraUtils = new Camera(videoElement, {
+      onFrame: async () => {
+        await hands.send({ image: videoElement });
+      },
+      width: 320,
+      height: 240
+    });
+
+    initThree();
+    animate();
+    cameraUtils.start();
+  </script>
+</body>
+</html>
